@@ -1,0 +1,75 @@
+# Define the AWS provider with the specified region
+provider "aws" {
+  region = "us-west-1"
+}
+
+# Create AWS instances for the app servers
+resource "aws_instance" "apps_servers" {
+  count         = 5
+  ami           = "ami-0c55b159cbfafe1f0" # Ubuntu 20.04 LTS AMI
+  instance_type = "t2.micro"
+
+  # Configure encrypted root block device with default encryption
+  root_block_device {
+    volume_size = 30
+    volume_type = "gp2"
+    encrypted   = true
+  }
+
+  # Add tags to identify instances
+  tags = {
+    Name = "apps_server-${count.index + 1}"
+    Type = "apps"
+  }
+
+  # User data script for initial server setup
+  user_data = <<-EOF
+ #!/bin/bash
+ echo 'root:admin#123' | chpasswd
+ apt-get update -y
+ apt-get upgrade -y
+ EOF
+
+  # Provisioners to install software on the instances
+  provisioner "remote-exec" {
+    inline = [
+      "apt-get install -y python3",
+      "apt-get install -y nginx",
+    ]
+  }
+}
+
+# Create a security group for the app servers
+resource "aws_security_group" "apps_sg" {
+  name = "apps_sg"
+
+  # Allow incoming traffic on ports 22 (SSH) and 443 (HTTPS)
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Block all outgoing traffic
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Attach network interfaces to the app instances
+resource "aws_network_interface_attachment" "apps_nia" {
+  count                 = 5
+  instance_id           = aws_instance.apps_servers[count.index].id
+  network_interface_ids = [aws_instance.apps_servers[count.index].network_interface_ids[0]]
+}
